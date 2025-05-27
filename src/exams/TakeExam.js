@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 import ExamService from '../services/ExamService';
 import '../styles/exam-styles.css';
 
-const TakeExam = ({ exam, userId, studentName, onComplete }) => {
+const TakeExam = ({ exam, userId, onComplete, onBack }) => {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState(Array(exam.questions.length).fill(null));
   const [timeLeft, setTimeLeft] = useState(exam.duration * 60);
@@ -12,8 +12,9 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [warning, setWarning] = useState(null);
+  const [showResults, setShowResults] = useState(false);
+  const [resultData, setResultData] = useState(null);
 
-  // التحقق من المحاولات السابقة عند تحميل المكون
   useEffect(() => {
     const checkAttempts = async () => {
       try {
@@ -39,7 +40,6 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
     checkAttempts();
   }, [exam.id, userId]);
 
-  // مؤقت الامتحان
   useEffect(() => {
     if (timeLeft <= 0 || isSubmitted) return;
 
@@ -57,32 +57,36 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
     return () => clearInterval(timer);
   }, [timeLeft, isSubmitted]);
 
-  // التقديم التلقائي عند انتهاء الوقت
   const handleAutoSubmit = async () => {
     if (isSubmitted) return;
     await handleSubmit();
   };
 
-  // تقديم الامتحان
   const handleSubmit = async () => {
     if (isSubmitted || (attemptInfo?.attempted && !attemptInfo?.canRetake)) return;
     
     try {
       setIsSubmitted(true);
       
-      // حساب الإجابات الصحيحة
       const correctAnswers = exam.questions.reduce((count, question, index) => {
         return count + (answers[index] === question.correctAnswer ? (question.points || 1) : 0);
       }, 0);
 
-      // تسجيل النتيجة
-      await ExamService.submitExamResult({
+      const totalPoints = exam.questions.reduce((sum, q) => sum + (q.points || 1), 0);
+      const percentage = Math.round((correctAnswers / totalPoints) * 100);
+      const passingGrade = exam.passingGrade || Math.ceil(totalPoints * 0.6);
+      const passed = correctAnswers >= passingGrade;
+
+      const result = {
         examId: exam.id,
         userId,
-        studentName,
+        studentName: localStorage.getItem('userName') || 'طالب',
         correctAnswers,
         totalQuestions: exam.questions.length,
-        passingGrade: exam.passingGrade || Math.ceil(exam.questions.length * 0.6),
+        totalPoints,
+        percentage,
+        passingGrade,
+        passed,
         answers: exam.questions.map((q, index) => ({
           questionId: q.id || `q${index}`,
           questionText: q.questionText,
@@ -91,10 +95,16 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
           isCorrect: answers[index] === q.correctAnswer,
           points: q.points || 1
         }))
-      });
+      };
 
-      // إعلام المكون الأب بانتهاء الامتحان
-      onComplete(exam.id, answers);
+      await ExamService.submitExamResult(result);
+      setResultData(result);
+      setShowResults(true);
+      
+      // إرسال النتيجة إلى الصفحة الرئيسية
+      if (onComplete) {
+        onComplete(exam.id, answers);
+      }
     } catch (error) {
       console.error('Error submitting exam:', error);
       setError(error.message || 'حدث خطأ أثناء تسليم الاختبار');
@@ -102,28 +112,24 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
     }
   };
 
-  // الانتقال إلى السؤال التالي
   const goToNextQuestion = () => {
     if (currentQuestionIndex < exam.questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
     }
   };
 
-  // الانتقال إلى السؤال السابق
   const goToPreviousQuestion = () => {
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex(currentQuestionIndex - 1);
     }
   };
 
-  // تغيير الإجابة الحالية
   const handleAnswerChange = (answerIndex) => {
     const newAnswers = [...answers];
     newAnswers[currentQuestionIndex] = answerIndex;
     setAnswers(newAnswers);
   };
 
-  // تنسيق الوقت المتبقي
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -144,20 +150,9 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
       <div className="exam-error-container">
         <h2>حدث خطأ</h2>
         <p>{error}</p>
-        <div className="exam-error-actions">
-          <button 
-            onClick={() => window.location.reload()} 
-            className="exam-retry-button"
-          >
-            إعادة المحاولة
-          </button>
-          <button 
-            onClick={() => onComplete(exam.id, [])} 
-            className="exam-back-button"
-          >
-            العودة
-          </button>
-        </div>
+        <button onClick={onBack} className="back-button">
+          العودة للخلف
+        </button>
       </div>
     );
   }
@@ -172,12 +167,76 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
           <p>الحالة: <strong>{attemptInfo.lastAttempt?.passed ? 'ناجح' : 'راسب'}</strong></p>
           <p>تاريخ الأداء: {attemptInfo.lastAttempt?.submittedAt?.toLocaleString('ar-EG') || '--'}</p>
         </div>
-        <button 
-          onClick={() => onComplete(exam.id, [])} 
-          className="exam-back-button"
-        >
-          العودة
+        <button onClick={onBack} className="back-button">
+          العودة للخلف
         </button>
+      </div>
+    );
+  }
+
+  if (showResults && resultData) {
+    return (
+      <div className="exam-results-container">
+        <h2>نتيجة الامتحان: {exam.title}</h2>
+        
+        <div className="result-summary">
+          <div className="result-card">
+            <span className="result-value">{resultData.percentage}%</span>
+            <span className="result-label">النسبة المئوية</span>
+          </div>
+          <div className="result-card">
+            <span className="result-value">
+              {resultData.correctAnswers}/{resultData.totalPoints} نقطة
+            </span>
+            <span className="result-label">الدرجة</span>
+          </div>
+          <div className="result-card">
+            <span className={`result-value ${resultData.passed ? 'passed' : 'failed'}`}>
+              {resultData.passed ? 'ناجح' : 'راسب'}
+            </span>
+            <span className="result-label">الحالة</span>
+          </div>
+        </div>
+
+        <div className="detailed-results">
+          <h3>تفاصيل الإجابات:</h3>
+          {resultData.answers.map((answer, index) => (
+            <div key={index} className={`answer-detail ${answer.isCorrect ? 'correct' : 'wrong'}`}>
+              <p><strong>السؤال {index + 1}:</strong> {answer.questionText}</p>
+              <p>إجابتك: {answer.selectedAnswer !== null ? 
+                exam.questions[index].options[answer.selectedAnswer] : 'لم تجب'}</p>
+              <p>الإجابة الصحيحة: {exam.questions[index].options[answer.correctAnswer]}</p>
+              <p>النقاط: {answer.isCorrect ? answer.points : 0}/{answer.points}</p>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={onBack} className="back-button">
+          العودة إلى قائمة الامتحانات
+        </button>
+      </div>
+    );
+  }
+
+  if (warning) {
+    return (
+      <div className="exam-warning-container">
+        <h2>{warning.title}</h2>
+        <p>{warning.message}</p>
+        <div className="exam-warning-actions">
+          <button 
+            onClick={() => setWarning(null)}
+            className="exam-continue-button"
+          >
+            متابعة الامتحان
+          </button>
+          <button 
+            onClick={onBack}
+            className="exam-cancel-button"
+          >
+            العودة للخلف
+          </button>
+        </div>
       </div>
     );
   }
@@ -186,19 +245,6 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
 
   return (
     <div className="exam-container">
-      {warning && (
-        <div className="exam-warning">
-          <h3>{warning.title}</h3>
-          <p>{warning.message}</p>
-          <button 
-            onClick={() => setWarning(null)}
-            className="exam-continue-button"
-          >
-            متابعة
-          </button>
-        </div>
-      )}
-
       <div className="exam-header">
         <h1 className="exam-title">{exam.title}</h1>
         <div className="exam-timer">
@@ -235,7 +281,7 @@ const TakeExam = ({ exam, userId, studentName, onComplete }) => {
               onClick={() => handleAnswerChange(index)}
             >
               <span className="option-letter">
-                {String.fromCharCode(1633 + index)} {/* الحروف العربية (أ، ب، ج، ...) */}
+                {String.fromCharCode(1633 + index)}
               </span>
               <span className="option-text">{option}</span>
             </div>
@@ -293,7 +339,6 @@ TakeExam.propTypes = {
   exam: PropTypes.shape({
     id: PropTypes.string.isRequired,
     title: PropTypes.string.isRequired,
-    description: PropTypes.string,
     duration: PropTypes.number.isRequired,
     questions: PropTypes.arrayOf(
       PropTypes.shape({
@@ -301,21 +346,18 @@ TakeExam.propTypes = {
         questionText: PropTypes.string.isRequired,
         options: PropTypes.arrayOf(PropTypes.string).isRequired,
         correctAnswer: PropTypes.number.isRequired,
-        points: PropTypes.number,
-        image: PropTypes.string
+        image: PropTypes.string,
+        points: PropTypes.number
       })
     ).isRequired,
     passingGrade: PropTypes.number,
     allowRetake: PropTypes.bool,
     unlimitedAttempts: PropTypes.bool,
-    maxAttempts: PropTypes.number,
-    createdAt: PropTypes.instanceOf(Date),
-    activatedAt: PropTypes.instanceOf(Date),
-    status: PropTypes.oneOf(['draft', 'active', 'archived'])
+    maxAttempts: PropTypes.number
   }).isRequired,
   userId: PropTypes.string.isRequired,
-  studentName: PropTypes.string.isRequired,
-  onComplete: PropTypes.func.isRequired
+  onComplete: PropTypes.func.isRequired,
+  onBack: PropTypes.func.isRequired
 };
 
 export default TakeExam;

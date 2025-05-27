@@ -15,21 +15,20 @@ const ExamResults = ({ examId, onBack }) => {
     averageScore: 0,
     passRate: 0
   });
+  const [sortBy, setSortBy] = useState('time');
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
-        // جلب بيانات الامتحان
         const examData = await ExamService.getExamById(examId);
         setExam(examData);
         
-        // جلب النتائج
         const resultsData = await ExamService.getExamResults(examId);
         setResults(resultsData);
         
-        // حساب الإحصائيات
         if (resultsData.length > 0) {
           const scores = resultsData.map(r => r.percentage || 0);
           const highest = Math.max(...scores);
@@ -56,6 +55,18 @@ const ExamResults = ({ examId, onBack }) => {
     fetchData();
   }, [examId]);
 
+  const filteredResults = results.filter(result => 
+    result.studentName.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const sortedResults = [...filteredResults].sort((a, b) => {
+    if (sortBy === 'time') {
+      return new Date(a.submittedAt) - new Date(b.submittedAt);
+    } else {
+      return b.percentage - a.percentage;
+    }
+  });
+
   const exportToCSV = () => {
     if (!results.length) return;
     
@@ -68,7 +79,7 @@ const ExamResults = ({ examId, onBack }) => {
       'تاريخ التسليم'
     ].join(',');
     
-    const rows = results.map((result, index) => [
+    const rows = sortedResults.map((result, index) => [
       index + 1,
       result.studentName,
       result.correctAnswers,
@@ -151,8 +162,36 @@ const ExamResults = ({ examId, onBack }) => {
           </div>
           
           <div className="results-actions">
+            <div className="search-control">
+              <input
+                type="text"
+                placeholder="ابحث عن طالب..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            
+            <div className="sort-buttons">
+              <span className="sort-label">ترتيب حسب:</span>
+              <button 
+                onClick={() => setSortBy('time')} 
+                className={`sort-button ${sortBy === 'time' ? 'active' : ''}`}
+              >
+                <span className="sort-icon">🕒</span>
+                <span>وقت التسليم (الأقدم)</span>
+              </button>
+              <button 
+                onClick={() => setSortBy('percentage')} 
+                className={`sort-button ${sortBy === 'percentage' ? 'active' : ''}`}
+              >
+                <span className="sort-icon">📊</span>
+                <span>النسبة المئوية (الأعلى)</span>
+              </button>
+            </div>
+            
             <button onClick={exportToCSV} className="export-btn">
-              تصدير النتائج (CSV)
+              <span className="export-icon">⬇️</span>
+              <span>تصدير النتائج (CSV)</span>
             </button>
           </div>
           
@@ -169,9 +208,13 @@ const ExamResults = ({ examId, onBack }) => {
                 </tr>
               </thead>
               <tbody>
-                {results.map((result, index) => (
+                {sortedResults.map((result, index) => (
                   <tr key={result.id}>
-                    <td>{index + 1}</td>
+                    <td>
+                      <span className={`rank ${index < 3 ? `top-${index + 1}` : ''}`}>
+                        {index + 1}
+                      </span>
+                    </td>
                     <td>{result.studentName}</td>
                     <td>{result.correctAnswers}/{result.totalQuestions}</td>
                     <td>{result.percentage}%</td>

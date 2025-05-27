@@ -14,14 +14,12 @@ import {
 } from 'firebase/firestore';
 
 const ExamService = {
-  // إنشاء امتحان جديد
   createExam: async (examData) => {
     try {
       const examWithTimestamp = {
         ...examData,
         createdAt: Timestamp.now(),
-        status: 'draft',
-        active: false
+        status: 'draft'
       };
       const docRef = await addDoc(collection(db, "exams"), examWithTimestamp);
       return docRef.id;
@@ -31,13 +29,12 @@ const ExamService = {
     }
   },
 
-  // تفعيل الامتحان
   activateExam: async (examId) => {
     try {
       await updateDoc(doc(db, "exams", examId), {
         status: 'active',
         activatedAt: Timestamp.now(),
-        active: true
+        deactivatedAt: null
       });
     } catch (error) {
       console.error("Error activating exam:", error);
@@ -45,7 +42,19 @@ const ExamService = {
     }
   },
 
-  // الحصول على امتحان بواسطة ID
+  deactivateExam: async (examId) => {
+    try {
+      await updateDoc(doc(db, "exams", examId), {
+        status: 'draft',
+        deactivatedAt: Timestamp.now(),
+        activatedAt: null
+      });
+    } catch (error) {
+      console.error("Error deactivating exam:", error);
+      throw new Error("حدث خطأ أثناء إيقاف الامتحان");
+    }
+  },
+
   getExamById: async (examId) => {
     try {
       const docSnap = await getDoc(doc(db, "exams", examId));
@@ -54,7 +63,8 @@ const ExamService = {
           id: docSnap.id,
           ...docSnap.data(),
           createdAt: docSnap.data().createdAt?.toDate(),
-          activatedAt: docSnap.data().activatedAt?.toDate()
+          activatedAt: docSnap.data().activatedAt?.toDate(),
+          deactivatedAt: docSnap.data().deactivatedAt?.toDate()
         };
       }
       return null;
@@ -64,36 +74,16 @@ const ExamService = {
     }
   },
 
-  // الحصول على جميع الامتحانات لمجموعة معينة
-  getExamsForGroup: async (groupId) => {
-    try {
-      const q = query(collection(db, "exams"), where("groupId", "==", groupId));
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-        activatedAt: doc.data().activatedAt?.toDate()
-      }));
-    } catch (error) {
-      console.error("Error fetching exams:", error);
-      throw new Error("حدث خطأ أثناء جلب قائمة الامتحانات");
-    }
-  },
-
-  // حذف امتحان
   deleteExam: async (examId) => {
     try {
       const batch = writeBatch(db);
       
-      // حذف النتائج المرتبطة بالامتحان
       const resultsQuery = query(collection(db, "examResults"), where("examId", "==", examId));
       const resultsSnapshot = await getDocs(resultsQuery);
       resultsSnapshot.docs.forEach(doc => {
         batch.delete(doc.ref);
       });
       
-      // حذف الامتحان نفسه
       batch.delete(doc(db, "exams", examId));
       
       await batch.commit();
@@ -103,7 +93,6 @@ const ExamService = {
     }
   },
 
-  // التحقق من المحاولات السابقة للامتحان
   checkExamAttempt: async (examId, userId) => {
     try {
       const resultsRef = collection(db, "examResults");
@@ -120,7 +109,6 @@ const ExamService = {
         submittedAt: doc.data().submittedAt?.toDate()
       }));
 
-      // الحصول على بيانات الامتحان
       const examDoc = await getDoc(doc(db, "exams", examId));
       if (!examDoc.exists()) {
         throw new Error("الامتحان غير موجود");
@@ -140,7 +128,6 @@ const ExamService = {
     }
   },
 
-  // تسليم نتيجة الامتحان
   submitExamResult: async (resultData) => {
     try {
       const examDoc = await getDoc(doc(db, "exams", resultData.examId));
@@ -150,20 +137,22 @@ const ExamService = {
       
       const examData = examDoc.data();
       const totalQuestions = resultData.totalQuestions || examData.questions?.length || 0;
+      const totalPoints = examData.questions?.reduce((sum, q) => sum + (q.points || 1), 0) || totalQuestions;
       const correctAnswers = resultData.correctAnswers || 0;
-      const passingGrade = resultData.passingGrade || examData.passingGrade || Math.ceil(totalQuestions * 0.6);
+      const percentage = Math.round((correctAnswers / totalPoints) * 100);
+      const passingGrade = resultData.passingGrade || examData.passingGrade || Math.ceil(totalPoints * 0.6);
+      const passed = correctAnswers >= passingGrade;
       
       const resultWithDetails = {
         ...resultData,
         examTitle: examData.title,
         totalQuestions,
+        totalPoints,
         correctAnswers,
         passingGrade,
-        percentage: Math.round((correctAnswers / totalQuestions) * 100),
-        passed: correctAnswers >= passingGrade,
-        submittedAt: Timestamp.now(),
-        userId: resultData.userId,
-        studentName: resultData.studentName || "مستخدم غير معروف"
+        percentage,
+        passed,
+        submittedAt: Timestamp.now()
       };
       
       const docRef = await addDoc(collection(db, "examResults"), resultWithDetails);
@@ -174,7 +163,6 @@ const ExamService = {
     }
   },
 
-  // الحصول على نتائج الامتحان
   getExamResults: async (examId) => {
     try {
       const q = query(collection(db, "examResults"), where("examId", "==", examId));
@@ -190,7 +178,6 @@ const ExamService = {
     }
   },
 
-  // تحديث بيانات الامتحان
   updateExam: async (examId, updates) => {
     try {
       await updateDoc(doc(db, "exams", examId), updates);

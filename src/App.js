@@ -82,6 +82,58 @@ const examService = {
     }
   },
 
+  activateExam: async (examId) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("يجب تسجيل الدخول أولاً");
+      
+      const examRef = doc(db, "exams", examId);
+      const examSnap = await getDoc(examRef);
+      
+      if (!examSnap.exists()) {
+        throw new Error("الامتحان غير موجود");
+      }
+      
+      if (examSnap.data().creatorId !== user.uid) {
+        throw new Error("ليس لديك صلاحية تفعيل هذا الامتحان");
+      }
+      
+      await updateDoc(examRef, {
+        status: 'active',
+        activatedAt: new Date()
+      });
+    } catch (error) {
+      console.error("Error activating exam:", error);
+      throw error;
+    }
+  },
+
+  deactivateExam: async (examId) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("يجب تسجيل الدخول أولاً");
+      
+      const examRef = doc(db, "exams", examId);
+      const examSnap = await getDoc(examRef);
+      
+      if (!examSnap.exists()) {
+        throw new Error("الامتحان غير موجود");
+      }
+      
+      if (examSnap.data().creatorId !== user.uid) {
+        throw new Error("ليس لديك صلاحية إيقاف هذا الامتحان");
+      }
+      
+      await updateDoc(examRef, {
+        status: 'inactive',
+        deactivatedAt: new Date()
+      });
+    } catch (error) {
+      console.error("Error deactivating exam:", error);
+      throw error;
+    }
+  },
+
   updateExam: async (examId, updates) => {
     try {
       const user = auth.currentUser;
@@ -652,14 +704,10 @@ function Timer({ user, onBack, groupId }) {
     return () => clearInterval(interval);
   }, [members]);
 
-
   const handleActivateExam = async (exam) => {
     setExamLoading(true);
     try {
-      await examService.updateExam(exam.id, { 
-        status: 'active',
-        activatedAt: new Date()
-      });
+      await examService.activateExam(exam.id);
       showNotification('تم تفعيل الامتحان بنجاح');
     } catch (error) {
       console.error('Error activating exam:', error);
@@ -669,11 +717,24 @@ function Timer({ user, onBack, groupId }) {
     }
   };
 
-  const handleDeleteExam = async (exam) => {
-    if (window.confirm(`هل أنت متأكد من حذف الامتحان "${exam.title}"؟`)) {
+  const handleDeactivateExam = async (exam) => {
+    setExamLoading(true);
+    try {
+      await examService.deactivateExam(exam.id);
+      showNotification('تم إيقاف الامتحان بنجاح');
+    } catch (error) {
+      console.error('Error deactivating exam:', error);
+      showNotification(`حدث خطأ أثناء إيقاف الامتحان: ${error.message}`);
+    } finally {
+      setExamLoading(false);
+    }
+  };
+
+  const handleDeleteExam = async (examId) => {
+    if (window.confirm('هل أنت متأكد من حذف هذا الامتحان؟ سيتم حذف جميع النتائج المرتبطة به.')) {
       setExamLoading(true);
       try {
-        await examService.deleteExam(exam.id);
+        await examService.deleteExam(examId);
         showNotification('تم حذف الامتحان بنجاح');
       } catch (error) {
         console.error('Error deleting exam:', error);
@@ -710,7 +771,6 @@ function Timer({ user, onBack, groupId }) {
       setExamLoading(false);
     }
   };
-
 
   const calculateScore = (answers) => {
     if (!selectedExam) return 0;
@@ -1066,6 +1126,7 @@ function Timer({ user, onBack, groupId }) {
                 isCreator={isCreator}
                 currentUserId={user?.uid}
                 onActivateExam={handleActivateExam}
+                onDeactivateExam={handleDeactivateExam}
                 onDeleteExam={handleDeleteExam}
                 onStartCreate={() => setActiveExamTab('create')}
                 onViewResults={(exam) => {

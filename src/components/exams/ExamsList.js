@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import ExamService from '../../services/ExamService';
 import '../../styles/exam-styles.css';
 
 const ExamsList = ({ 
@@ -8,29 +7,66 @@ const ExamsList = ({
   isCreator, 
   currentUserId,
   onActivateExam,
+  onDeactivateExam,
   onDeleteExam,
   onStartCreate,
   onViewResults,
   onTakeExam
 }) => {
   const [filter, setFilter] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const filteredExams = exams.filter(exam => {
-    if (filter === 'active') return exam.status === 'active';
-    if (filter === 'draft') return exam.status === 'draft';
-    if (filter === 'mine') return exam.creatorId === currentUserId;
-    return true;
+    const filterMatch = 
+      filter === 'all' || 
+      (filter === 'active' && exam.status === 'active') ||
+      (filter === 'draft' && exam.status === 'draft') ||
+      (filter === 'mine' && exam.creatorId === currentUserId);
+    
+    const searchMatch = 
+      searchTerm === '' ||
+      exam.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (exam.description && exam.description.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    return filterMatch && searchMatch;
   });
 
-  const handleActivate = async (examId) => {
+  const formatDate = (date) => {
+    if (!date) return '--';
+    
+    try {
+      if (date.toDate) {
+        return date.toDate().toLocaleDateString('ar-EG');
+      }
+      if (date instanceof Date) {
+        return date.toLocaleDateString('ar-EG');
+      }
+      if (typeof date === 'string') {
+        return new Date(date).toLocaleDateString('ar-EG');
+      }
+      if (typeof date === 'number') {
+        return new Date(date).toLocaleDateString('ar-EG');
+      }
+      return '--';
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return '--';
+    }
+  };
+
+  const handleToggleStatus = async (exam) => {
     try {
       setLoading(true);
-      await onActivateExam(examId);
+      if (exam.status === 'active') {
+        await onDeactivateExam(exam);
+      } else {
+        await onActivateExam(exam);
+      }
     } catch (err) {
-      console.error('Error activating exam:', err);
-      setError('حدث خطأ أثناء تفعيل الامتحان');
+      console.error('Error toggling exam status:', err);
+      setError('حدث خطأ أثناء تغيير حالة الامتحان: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -43,7 +79,7 @@ const ExamsList = ({
         await onDeleteExam(examId);
       } catch (err) {
         console.error('Error deleting exam:', err);
-        setError('حدث خطأ أثناء حذف الامتحان');
+        setError('حدث خطأ أثناء حذف الامتحان: ' + err.message);
       } finally {
         setLoading(false);
       }
@@ -56,6 +92,15 @@ const ExamsList = ({
         <h2>قائمة الامتحانات</h2>
         
         <div className="exams-controls">
+          <div className="search-control">
+            <input
+              type="text"
+              placeholder="ابحث عن امتحان..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          
           <div className="filter-control">
             <label>تصفية:</label>
             <select value={filter} onChange={(e) => setFilter(e.target.value)}>
@@ -112,9 +157,7 @@ const ExamsList = ({
                 <p><strong>عدد الأسئلة:</strong> {exam.questions?.length || 0}</p>
                 <p><strong>المدة:</strong> {exam.duration} دقيقة</p>
                 <p><strong>درجة النجاح:</strong> {exam.passingGrade || 60}%</p>
-                {exam.activatedAt && (
-                  <p><strong>تاريخ التفعيل:</strong> {exam.activatedAt.toLocaleString('ar-EG')}</p>
-                )}
+                <p><strong>تاريخ الإنشاء:</strong> {formatDate(exam.createdAt)}</p>
               </div>
               
               <div className="exam-actions">
@@ -128,31 +171,44 @@ const ExamsList = ({
                     </button>
                     
                     {isCreator && (
-                      <button 
-                        onClick={() => onViewResults(exam)} 
-                        className="view-results-btn"
-                      >
-                        عرض النتائج
-                      </button>
+                      <>
+                        <button 
+                          onClick={() => handleToggleStatus(exam)} 
+                          className="deactivate-exam-btn"
+                        >
+                          إيقاف
+                        </button>
+                        <button 
+                          onClick={() => onViewResults(exam)} 
+                          className="view-results-btn"
+                        >
+                          عرض النتائج
+                        </button>
+                      </>
                     )}
                   </>
-                ) : isCreator && exam.creatorId === currentUserId ? (
-                  <>
-                    <button 
-                      onClick={() => handleActivate(exam.id)} 
-                      className="activate-exam-btn"
-                    >
-                      تفعيل الامتحان
-                    </button>
-                    <button 
-                      onClick={() => handleDelete(exam.id)} 
-                      className="delete-exam-btn"
-                    >
-                      حذف
-                    </button>
-                  </>
                 ) : (
-                  <p className="not-available">غير متاح حالياً</p>
+                  <>
+                    {isCreator && exam.creatorId === currentUserId && (
+                      <>
+                        <button 
+                          onClick={() => handleToggleStatus(exam)} 
+                          className="activate-exam-btn"
+                        >
+                          تفعيل
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(exam.id)} 
+                          className="delete-exam-btn"
+                        >
+                          حذف الامتحان
+                        </button>
+                      </>
+                    )}
+                    {!isCreator && (
+                      <p className="not-available">غير متاح حالياً</p>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -164,22 +220,11 @@ const ExamsList = ({
 };
 
 ExamsList.propTypes = {
-  exams: PropTypes.arrayOf(
-    PropTypes.shape({
-      id: PropTypes.string.isRequired,
-      title: PropTypes.string.isRequired,
-      status: PropTypes.string.isRequired,
-      duration: PropTypes.number.isRequired,
-      passingGrade: PropTypes.number,
-      questions: PropTypes.array.isRequired,
-      creatorId: PropTypes.string.isRequired,
-      activatedAt: PropTypes.instanceOf(Date),
-      createdAt: PropTypes.instanceOf(Date)
-    })
-  ).isRequired,
+  exams: PropTypes.array.isRequired,
   isCreator: PropTypes.bool.isRequired,
   currentUserId: PropTypes.string.isRequired,
   onActivateExam: PropTypes.func.isRequired,
+  onDeactivateExam: PropTypes.func.isRequired,
   onDeleteExam: PropTypes.func.isRequired,
   onStartCreate: PropTypes.func.isRequired,
   onViewResults: PropTypes.func.isRequired,
