@@ -3,33 +3,50 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import './Profile.css';
+import userService from '../services/userService';
 
 function Profile({ user, showNotification, onBack }) {
   const [profile, setProfile] = useState({
     firstName: '',
     fatherName: '',
-    lastName: ''
+    lastName: '',
+    uniqueCode: '',
+    hasVerifiedCode: false
   });
   
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
     const loadProfile = async () => {
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (userDoc.exists()) {
-        setProfile({
-          firstName: userDoc.data().firstName || '',
-          fatherName: userDoc.data().fatherName || '',
-          lastName: userDoc.data().lastName || ''
-        });
+      try {
+        const userData = await userService.getUserData(user.uid);
+        if (userData) {
+          setProfile({
+            firstName: userData.firstName || '',
+            fatherName: userData.fatherName || '',
+            lastName: userData.lastName || '',
+            uniqueCode: userData.uniqueCode || '',
+            hasVerifiedCode: userData.hasVerifiedCode || false
+          });
+        }
+      } catch (error) {
+        console.error("Error loading profile:", error);
+        showNotification('حدث خطأ أثناء تحميل البيانات');
+      } finally {
+        setLoading(false);
       }
     };
     loadProfile();
-  }, [user]);
+  }, [user, showNotification]);
 
   const handleSave = async () => {
     try {
-      await updateDoc(doc(db, "users", user.uid), profile);
+      await userService.updateProfile(user.uid, {
+        firstName: profile.firstName,
+        fatherName: profile.fatherName,
+        lastName: profile.lastName
+      });
       showNotification('تم حفظ التعديلات بنجاح');
       if (onBack) {
         onBack();
@@ -50,10 +67,27 @@ function Profile({ user, showNotification, onBack }) {
     }
   };
 
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(profile.uniqueCode);
+    showNotification('تم نسخ الكود إلى الحافظة');
+  };
+
+  if (loading) {
+    return <div className="loading">جاري تحميل البيانات...</div>;
+  }
+
   return (
     <div className="profile-container">
       <div className="profile-form">
-        <h2>تعديل الملف الشخصي</h2>
+        <h2>الملف الشخصي</h2>
+        
+        <div className="profile-section">
+          <div className="profile-header">
+            <img src={user.photoURL} alt="صورة الملف الشخصي" className="profile-avatar" />
+            <h3>{user.displayName}</h3>
+            <p className="user-email">{user.email}</p>
+          </div>
+        </div>
         
         <div className="form-group">
           <label>الاسم الأول:</label>
@@ -81,6 +115,33 @@ function Profile({ user, showNotification, onBack }) {
             placeholder="أدخل اسم العائلة"
           />
         </div>
+
+        {profile.uniqueCode && (
+          <div className="form-group unique-code-group">
+            <label>الكود المميز:</label>
+            <div className="code-display">
+              <input 
+                type="text" 
+                value={profile.uniqueCode} 
+                readOnly 
+                className="code-input"
+              />
+              <button 
+                onClick={copyToClipboard}
+                className="copy-button"
+                title="نسخ الكود"
+              >
+                نسخ
+              </button>
+            </div>
+            <p className="code-status">
+              حالة التحقق: {profile.hasVerifiedCode ? '✅ تم التحقق' : '❌ غير مفعل'}
+            </p>
+            <p className="code-notice">
+              هذا الكود يستخدم للتحقق عند إنشاء مجموعات جديدة. لا تشاركه مع أحد.
+            </p>
+          </div>
+        )}
         
         <div className="profile-actions">
           <button onClick={handleSave} className="save-button">
@@ -91,7 +152,7 @@ function Profile({ user, showNotification, onBack }) {
             onClick={handleBack} 
             className="back-button"
           >
-            الرجوع إلى الصفحة الرئيسية
+            الرجوع
           </button>
         </div>
       </div>

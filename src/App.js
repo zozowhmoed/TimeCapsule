@@ -42,6 +42,79 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+const generateUniqueCode = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  let code = '';
+  for (let i = 0; i < 16; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
+
+// خدمة إدارة المستخدمين
+const userService = {
+  createOrUpdateUser: async (user) => {
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        // إنشاء مستخدم جديد مع كود مميز
+        const uniqueCode = generateUniqueCode();
+        await setDoc(userRef, {
+          uid: user.uid,
+          displayName: user.displayName,
+          email: user.email,
+          photoURL: user.photoURL,
+          uniqueCode,
+          hasVerifiedCode: false,
+          createdAt: new Date()
+        });
+        return { uniqueCode, hasVerifiedCode: false };
+      } else {
+        // المستخدم موجود بالفعل
+        return {
+          uniqueCode: userSnap.data().uniqueCode,
+          hasVerifiedCode: userSnap.data().hasVerifiedCode || false
+        };
+      }
+    } catch (error) {
+      console.error("Error creating/updating user:", error);
+      return null;
+    }
+  },
+
+  verifyUserCode: async (userId, enteredCode) => {
+    try {
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        return { success: false, message: "المستخدم غير موجود" };
+      }
+      
+      const userData = userSnap.data();
+      
+      if (userData.hasVerifiedCode) {
+        return { success: true, message: "تم التحقق مسبقاً" };
+      }
+      
+      if (userData.uniqueCode === enteredCode) {
+        await updateDoc(userRef, {
+          hasVerifiedCode: true,
+          codeVerifiedAt: new Date()
+        });
+        return { success: true, message: "تم التحقق بنجاح" };
+      } else {
+        return { success: false, message: "الكود غير صحيح" };
+      }
+    } catch (error) {
+      console.error("Error verifying code:", error);
+      return { success: false, message: "حدث خطأ أثناء التحقق" };
+    }
+  }
+};
+
 const examService = {
   getExamsForGroup: async (groupId) => {
     try {
@@ -175,7 +248,6 @@ const examService = {
       
       const batch = writeBatch(db);
       
-      // حذف النتائج المرتبطة بالامتحان
       const resultsQuery = query(
         collection(db, "examResults"), 
         where("examId", "==", examId)
@@ -226,45 +298,6 @@ const examService = {
   }
 };
 
-const userService = {
-  createOrUpdateUser: async (user, additionalData = {}) => {
-    try {
-      await setDoc(doc(db, "users", user.uid), {
-        displayName: user.displayName || '',
-        photoURL: user.photoURL || '',
-        email: user.email || '',
-        lastLogin: new Date(),
-        ...additionalData
-      }, { merge: true });
-      return true;
-    } catch (error) {
-      console.error("Error in createOrUpdateUser:", error);
-      return false;
-    }
-  },
-
-  getUserData: async (userId) => {
-    try {
-      const docRef = doc(db, "users", userId);
-      const docSnap = await getDoc(docRef);
-      return docSnap.exists() ? docSnap.data() : null;
-    } catch (error) {
-      console.error("Error in getUserData:", error);
-      return null;
-    }
-  },
-
-  updateProfile: async (userId, profileData) => {
-    try {
-      await updateDoc(doc(db, "users", userId), profileData);
-      return true;
-    } catch (error) {
-      console.error("Error in updateProfile:", error);
-      return false;
-    }
-  }
-};
-
 function Timer({ user, onBack, groupId }) {
   const [isRunning, setIsRunning] = useState(false);
   const [time, setTime] = useState(0);
@@ -309,14 +342,6 @@ function Timer({ user, onBack, groupId }) {
         .catch(err => {
           console.log('ServiceWorker registration failed: ', err);
         });
-    }
-  }, []);
-
-  useEffect(() => {
-    if ('serviceWorker' in navigator && 'SyncManager' in window) {
-      navigator.serviceWorker.ready.then(registration => {
-        registration.sync.register('sync-timer');
-      });
     }
   }, []);
 
@@ -1296,6 +1321,9 @@ function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [notification, setNotification] = useState(null);
   const [activeTab, setActiveTab] = useState('groups');
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [codeVerified, setCodeVerified] = useState(false);
+  const [codeAttempts, setCodeAttempts] = useState(3);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -1336,18 +1364,15 @@ function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-        const isNewUser = !userDoc.exists();
-        
-        await userService.createOrUpdateUser(currentUser, {
-          firstName: isNewUser ? '' : userDoc.data()?.firstName,
-          fatherName: isNewUser ? '' : userDoc.data()?.fatherName,
-          lastName: isNewUser ? '' : userDoc.data()?.lastName,
-          nickname: isNewUser ? currentUser.displayName || 'مستخدم جديد' : userDoc.data()?.nickname,
-          registrationDate: isNewUser ? new Date() : userDoc.data()?.registrationDate
-        });
-        
-        setUser(currentUser);
+        const userData = await userService.createOrUpdateUser(currentUser);
+        if (userData) {
+          setUser({
+            ...currentUser,
+            uniqueCode: userData.uniqueCode,
+            hasVerifiedCode: userData.hasVerifiedCode || false
+          });
+          setCodeVerified(userData.hasVerifiedCode || false);
+        }
         await fetchUserGroups(currentUser.uid);
       } else {
         setUser(null);
@@ -1534,6 +1559,44 @@ function App() {
     setSelectedGroup(null);
   };
 
+  const handleAddGroupClick = () => {
+    if (!codeVerified) {
+      setShowCodeModal(true);
+    } else {
+      document.querySelector('.group-creation input').focus();
+    }
+  };
+
+  const handleCodeVerify = async () => {
+    if (!joinCode.trim()) {
+      showNotification('الرجاء إدخال الكود');
+      return;
+    }
+
+    const result = await userService.verifyUserCode(user.uid, joinCode.trim());
+    
+    if (result.success) {
+      setCodeVerified(true);
+      setShowCodeModal(false);
+      setJoinCode('');
+      showNotification('تم التحقق بنجاح! يمكنك الآن إنشاء مجموعات جديدة');
+    } else {
+      handleCodeError();
+      showNotification(result.message || 'الكود غير صحيح');
+    }
+  };
+
+  const handleCodeError = () => {
+    const remainingAttempts = codeAttempts - 1;
+    setCodeAttempts(remainingAttempts);
+    
+    if (remainingAttempts <= 0) {
+      setShowCodeModal(false);
+      showNotification('لقد استنفذت جميع محاولات التحقق. يرجى المحاولة لاحقاً');
+      setCodeAttempts(3); // إعادة تعيين المحاولات
+    }
+  };
+
   if (selectedGroup && user) {
     return (
       <div className="App">
@@ -1606,12 +1669,21 @@ function App() {
                           value={groupName}
                           onChange={(e) => setGroupName(e.target.value)}
                           placeholder="أدخل اسم المجموعة"
-                          onKeyPress={(e) => e.key === 'Enter' && addStudyGroup()}
+                          onKeyPress={(e) => e.key === 'Enter' && codeVerified && addStudyGroup()}
+                          disabled={!codeVerified}
                         />
-                        <button className="create-button" onClick={addStudyGroup}>
-                          إنشاء
+                        <button 
+                          className="create-button" 
+                          onClick={codeVerified ? addStudyGroup : handleAddGroupClick}
+                        >
+                          {codeVerified ? 'إنشاء' : 'التحقق لإنشاء مجموعة'}
                         </button>
                       </div>
+                      {!codeVerified && (
+                        <p className="code-notice">
+                          يجب التحقق من الكود المميز الخاص بك قبل إنشاء مجموعات جديدة
+                        </p>
+                      )}
                     </div>
                     
                     <div className="join-group">
@@ -1639,7 +1711,7 @@ function App() {
                         <p>لا توجد مجموعات متاحة حالياً</p>
                         <button 
                           className="create-button"
-                          onClick={() => document.querySelector('.group-creation input').focus()}
+                          onClick={handleAddGroupClick}
                         >
                           إنشاء مجموعة جديدة
                         </button>
@@ -1707,6 +1779,48 @@ function App() {
                       </button>
                       <button 
                         onClick={() => setShowJoinModal(false)} 
+                        className="cancel-button"
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showCodeModal && (
+                <div className="modal-overlay" onClick={() => setShowCodeModal(false)}>
+                  <div className="modal-content" onClick={e => e.stopPropagation()}>
+                    <button className="close-button" onClick={() => setShowCodeModal(false)}>
+                      &times;
+                    </button>
+                    
+                    <h2>التحقق من الكود المميز</h2>
+                    <p>لإنشاء مجموعات جديدة، يرجى إدخال الكود المكون من 16 حرف المرفق مع حسابك</p>
+                    
+                    <input
+                      type="text"
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value)}
+                      placeholder="أدخل الكود المميز"
+                      maxLength={16}
+                      className="join-input"
+                    />
+                    
+                    {codeAttempts < 3 && (
+                      <p className="attempts-left">المحاولات المتبقية: {codeAttempts}</p>
+                    )}
+                    
+                    <div className="modal-actions">
+                      <button 
+                        onClick={handleCodeVerify} 
+                        className="confirm-button"
+                        disabled={!joinCode.trim()}
+                      >
+                        تأكيد
+                      </button>
+                      <button 
+                        onClick={() => setShowCodeModal(false)} 
                         className="cancel-button"
                       >
                         إلغاء
