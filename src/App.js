@@ -112,6 +112,95 @@ const userService = {
       console.error("Error verifying code:", error);
       return { success: false, message: "حدث خطأ أثناء التحقق" };
     }
+  },
+
+  createUserCode: async (userId) => {
+    try {
+      const code = generateUniqueCode();
+      await setDoc(doc(db, "userCodes", userId), {
+        code,
+        verified: false,
+        createdAt: new Date(),
+        attempts: 0
+      });
+      return { code, verified: false };
+    } catch (error) {
+      console.error("Error creating user code:", error);
+      throw error;
+    }
+  },
+
+  verifyUserCode: async (userId, code) => {
+    try {
+      const codeRef = doc(db, "userCodes", userId);
+      const codeSnap = await getDoc(codeRef);
+      
+      if (!codeSnap.exists()) {
+        return { verified: false, message: "الكود غير موجود" };
+      }
+      
+      const codeData = codeSnap.data();
+      
+      if (codeData.verified) {
+        return { verified: true, message: "تم التحقق مسبقاً" };
+      }
+      
+      if (codeData.code === code) {
+        await updateDoc(codeRef, {
+          verified: true,
+          verifiedAt: new Date()
+        });
+        
+        // تحديث حالة التحقق في مستند المستخدم
+        await updateDoc(doc(db, "users", userId), {
+          hasVerifiedCode: true
+        });
+        
+        return { verified: true, message: "تم التحقق بنجاح" };
+      } else {
+        // زيادة عدد المحاولات
+        await updateDoc(codeRef, {
+          attempts: codeData.attempts + 1
+        });
+        
+        return { verified: false, message: "الكود غير صحيح" };
+      }
+    } catch (error) {
+      console.error("Error verifying code:", error);
+      throw error;
+    }
+  },
+
+  getCodeInfo: async (userId) => {
+    try {
+      const codeRef = doc(db, "userCodes", userId);
+      const codeSnap = await getDoc(codeRef);
+      
+      if (!codeSnap.exists()) {
+        return null;
+      }
+      
+      return codeSnap.data();
+    } catch (error) {
+      console.error("Error getting code info:", error);
+      throw error;
+    }
+  },
+
+  checkCodeVerification: async (userId) => {
+    try {
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        return false;
+      }
+      
+      return userSnap.data().hasVerifiedCode || false;
+    } catch (error) {
+      console.error("Error checking code verification:", error);
+      throw error;
+    }
   }
 };
 
@@ -1432,6 +1521,26 @@ function App() {
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(auth, provider);
+      const userData = await userService.createOrUpdateUser(result.user);
+      
+      if (userData) {
+        setUser({
+          ...result.user,
+          uniqueCode: userData.uniqueCode,
+          hasVerifiedCode: userData.hasVerifiedCode || false
+        });
+        
+        // إنشاء كود التحقق للمستخدم
+        const codeResult = await userService.createUserCode(result.user.uid);
+        console.log('User code:', codeResult.code);
+        
+        // التحقق من حالة التحقق للمستخدم
+        const isVerified = await userService.checkCodeVerification(result.user.uid);
+        if (isVerified) {
+          setCodeVerified(true);
+        }
+      }
+      
       showNotification(`🎉 مرحباً ${result.user.displayName}!`);
     } catch (error) {
       console.error("Error signing in:", error);
@@ -1567,22 +1676,28 @@ function App() {
     }
   };
 
-  const handleCodeVerify = async () => {
-    if (!joinCode.trim()) {
-      showNotification('الرجاء إدخال الكود');
-      return;
-    }
-
-    const result = await userService.verifyUserCode(user.uid, joinCode.trim());
-    
-    if (result.success) {
-      setCodeVerified(true);
-      setShowCodeModal(false);
-      setJoinCode('');
-      showNotification('تم التحقق بنجاح! يمكنك الآن إنشاء مجموعات جديدة');
-    } else {
-      handleCodeError();
-      showNotification(result.message || 'الكود غير صحيح');
+  const verifyCode = async () => {
+    try {
+      const verified = await userService.verifyUserCode(user.uid, joinCode);
+      if (verified.success) {
+        setCodeVerified(true);
+        setShowCodeModal(false);
+        setJoinCode('');
+        showNotification('تم التحقق بنجاح!');
+        
+        // تمكين الميزات الإضافية للمستخدم
+        enablePremiumFeatures(user.uid);
+        
+        // الحصول على معلومات الكود
+        const codeInfo = await userService.getCodeInfo(user.uid);
+        console.log('Code info:', codeInfo);
+      } else {
+        handleCodeError();
+        showNotification(verified.message || 'الكود غير صحيح');
+      }
+    } catch (error) {
+      console.error('Verification error:', error);
+      showNotification('حدث خطأ أثناء التحقق');
     }
   };
 
@@ -1595,6 +1710,11 @@ function App() {
       showNotification('لقد استنفذت جميع محاولات التحقق. يرجى المحاولة لاحقاً');
       setCodeAttempts(3); // إعادة تعيين المحاولات
     }
+  };
+
+  const enablePremiumFeatures = (userId) => {
+    // هنا يمكنك إضافة أي منطق لتمكين الميزات المميزة للمستخدم
+    console.log(`تم تمكين الميزات المميزة للمستخدم ${userId}`);
   };
 
   if (selectedGroup && user) {
@@ -1813,7 +1933,7 @@ function App() {
                     
                     <div className="modal-actions">
                       <button 
-                        onClick={handleCodeVerify} 
+                        onClick={verifyCode} 
                         className="confirm-button"
                         disabled={!joinCode.trim()}
                       >
