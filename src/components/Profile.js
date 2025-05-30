@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import './Profile.css';
 import userService from '../services/userService';
@@ -9,9 +7,7 @@ function Profile({ user, showNotification, onBack }) {
   const [profile, setProfile] = useState({
     firstName: '',
     fatherName: '',
-    lastName: '',
-    uniqueCode: '',
-    hasVerifiedCode: false
+    lastName: ''
   });
   
   const [loading, setLoading] = useState(true);
@@ -21,13 +17,12 @@ function Profile({ user, showNotification, onBack }) {
     const loadProfile = async () => {
       try {
         const userData = await userService.getUserData(user.uid);
+
         if (userData) {
           setProfile({
             firstName: userData.firstName || '',
             fatherName: userData.fatherName || '',
-            lastName: userData.lastName || '',
-            uniqueCode: userData.uniqueCode || '',
-            hasVerifiedCode: userData.hasVerifiedCode || false
+            lastName: userData.lastName || ''
           });
         }
       } catch (error) {
@@ -40,6 +35,10 @@ function Profile({ user, showNotification, onBack }) {
     loadProfile();
   }, [user, showNotification]);
 
+  const showReloadNotification = () => {
+    showNotification('الرجاء إعادة تحميل الصفحة لحفظ التعديلات');
+  };
+
   const handleSave = async () => {
     try {
       await userService.updateProfile(user.uid, {
@@ -47,12 +46,9 @@ function Profile({ user, showNotification, onBack }) {
         fatherName: profile.fatherName,
         lastName: profile.lastName
       });
-      showNotification('تم حفظ التعديلات بنجاح');
-      if (onBack) {
-        onBack();
-      } else {
-        navigate('/');
-      }
+      showReloadNotification();
+      if (onBack) onBack();
+      else navigate('/');
     } catch (error) {
       console.error("Error updating profile:", error);
       showNotification('حدث خطأ أثناء حفظ التعديلات');
@@ -60,16 +56,9 @@ function Profile({ user, showNotification, onBack }) {
   };
 
   const handleBack = () => {
-    if (onBack) {
-      onBack();
-    } else {
-      navigate('/');
-    }
-  };
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(profile.uniqueCode);
-    showNotification('تم نسخ الكود إلى الحافظة');
+    showReloadNotification();
+    if (onBack) onBack();
+    else navigate('/');
   };
 
   if (loading) {
@@ -88,7 +77,7 @@ function Profile({ user, showNotification, onBack }) {
             <p className="user-email">{user.email}</p>
           </div>
         </div>
-        
+
         <div className="form-group">
           <label>الاسم الأول:</label>
           <input 
@@ -115,43 +104,13 @@ function Profile({ user, showNotification, onBack }) {
             placeholder="أدخل اسم العائلة"
           />
         </div>
-
-        {profile.uniqueCode && (
-          <div className="form-group unique-code-group">
-            <label>الكود المميز:</label>
-            <div className="code-display">
-              <input 
-                type="text" 
-                value={profile.uniqueCode} 
-                readOnly 
-                className="code-input"
-              />
-              <button 
-                onClick={copyToClipboard}
-                className="copy-button"
-                title="نسخ الكود"
-              >
-                نسخ
-              </button>
-            </div>
-            <p className="code-status">
-              حالة التحقق: {profile.hasVerifiedCode ? '✅ تم التحقق' : '❌ غير مفعل'}
-            </p>
-            <p className="code-notice">
-              هذا الكود يستخدم للتحقق عند إنشاء مجموعات جديدة. لا تشاركه مع أحد.
-            </p>
-          </div>
-        )}
         
         <div className="profile-actions">
           <button onClick={handleSave} className="save-button">
             حفظ التعديلات
           </button>
           
-          <button 
-            onClick={handleBack} 
-            className="back-button"
-          >
+          <button onClick={handleBack} className="back-button">
             الرجوع
           </button>
         </div>

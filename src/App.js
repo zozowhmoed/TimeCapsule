@@ -27,6 +27,7 @@ import ExamsList from './components/exams/ExamsList';
 import ExamResults from './exams/ExamResults';
 import TakeExam from './exams/TakeExam';
 import CreateExam from './exams/CreateExam';
+import ArrowChartPage from './components/ArrowChartPage';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDoLr3Dnb5YbCnUtTexaz84YOH5h8Ukfoc",
@@ -68,7 +69,9 @@ const userService = {
           photoURL: user.photoURL,
           uniqueCode,
           hasVerifiedCode: false,
-          createdAt: new Date()
+          createdAt: new Date(),
+          points: 0,
+          level: 1
         });
         return { uniqueCode, hasVerifiedCode: false };
       } else {
@@ -413,34 +416,23 @@ function Timer({ user, onBack, groupId }) {
   const [activeExamTab, setActiveExamTab] = useState('list');
   const [examLoading, setExamLoading] = useState(false);
 
-  useEffect(() => {
-    if (groupId) {
-      const unsubscribe = examService.listenForExams(groupId, (examsData) => {
-        setExams(examsData);
-      });
-      return () => unsubscribe();
-    }
-  }, [groupId]);
-
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js')
-        .then(registration => {
-          console.log('ServiceWorker registration successful');
-        })
-        .catch(err => {
-          console.log('ServiceWorker registration failed: ', err);
-        });
-    }
-  }, []);
-
+  // نظام المستويات المعدل
   const calculateLevel = (points) => {
-    const base = 100;
-    const growthFactor = 1.15;
+    const basePoints = 100; // النقاط المطلوبة للوصول للمستوى 2
+    const growthFactor = 1.2; // عامل النمو بين المستويات
     
-    let level = 1;
-    let requiredPoints = base;
-    let totalPointsNeeded = base;
+    if (points < basePoints) {
+      return {
+        currentLevel: 1,
+        nextLevelPoints: basePoints,
+        progress: (points / basePoints) * 100,
+        pointsToNextLevel: basePoints - points
+      };
+    }
+
+    let level = 2;
+    let requiredPoints = Math.floor(basePoints * growthFactor);
+    let totalPointsNeeded = basePoints + requiredPoints;
     
     while (points >= totalPointsNeeded) {
       level++;
@@ -458,19 +450,19 @@ function Timer({ user, onBack, groupId }) {
     };
   };
 
-  const { currentLevel, progress, pointsToNextLevel } = calculateLevel(points);
-
+  // نظام الشارات المعدل
   const getBadge = (level) => {
     const badges = {
-      1: { name: "البذرة", icon: "🌱", color: "var(--secondary-color)", bgColor: "rgba(16, 185, 129, 0.1)" },
-      5: { name: "المتدرب", icon: "📖", color: "var(--primary-color)", bgColor: "rgba(79, 70, 229, 0.1)" },
-      10: { name: "المجتهد", icon: "🎓", color: "var(--warning-color)", bgColor: "rgba(245, 158, 11, 0.1)" },
-      20: { name: "الخبير", icon: "🔍", color: "var(--accent-color)", bgColor: "rgba(239, 68, 68, 0.1)" },
-      30: { name: "العبقري", icon: "🧠", color: "var(--primary-dark)", bgColor: "rgba(67, 56, 202, 0.1)" },
-      50: { name: "الأسطورة", icon: "🏆", color: "var(--warning-dark)", bgColor: "rgba(217, 119, 6, 0.1)" },
-      100: { name: "رائد المعرفة", icon: "🚀", color: "var(--secondary-dark)", bgColor: "rgba(5, 150, 105, 0.1)" }
+      1: { name: "المبتدئ", icon: "🌱", color: "#10B981", bgColor: "rgba(16, 185, 129, 0.1)" },
+      5: { name: "المتعلم", icon: "📚", color: "#3B82F6", bgColor: "rgba(59, 130, 246, 0.1)" },
+      10: { name: "المجتهد", icon: "🎓", color: "#F59E0B", bgColor: "rgba(245, 158, 11, 0.1)" },
+      15: { name: "الخبير", icon: "🔍", color: "#8B5CF6", bgColor: "rgba(139, 92, 246, 0.1)" },
+      20: { name: "المحترف", icon: "🏅", color: "#EC4899", bgColor: "rgba(236, 72, 153, 0.1)" },
+      25: { name: "الأسطورة", icon: "🏆", color: "#F97316", bgColor: "rgba(249, 115, 22, 0.1)" },
+      30: { name: "رائد المعرفة", icon: "🚀", color: "#06B6D4", bgColor: "rgba(6, 182, 212, 0.1)" }
     };
     
+    // إيجاد أعلى شارة مؤهلة
     const eligibleLevels = Object.keys(badges)
       .map(Number)
       .filter(lvl => level >= lvl)
@@ -479,8 +471,8 @@ function Timer({ user, onBack, groupId }) {
     return badges[eligibleLevels[0]] || badges[1];
   };
 
+  const { currentLevel, progress, pointsToNextLevel } = calculateLevel(points);
   const currentBadge = getBadge(currentLevel);
-
   const shopItems = [
     { 
       id: "boost", 
@@ -953,6 +945,14 @@ function Timer({ user, onBack, groupId }) {
             <span className="tab-icon">📝</span>
             <span className="tab-label">الاختبارات</span>
           </button>
+
+          <button 
+            className={`tab-button ${activeTab === 'progress' ? 'active' : ''}`}
+            onClick={() => setActiveTab('progress')}
+          >
+            <span className="tab-icon">📊</span>
+            <span className="tab-label">المخطط السهمي</span>
+          </button>
         </div>
       </div>
 
@@ -1282,6 +1282,10 @@ function Timer({ user, onBack, groupId }) {
               />
             )}
           </div>
+        )}
+
+        {activeTab === 'progress' && (
+          <ArrowChartPage points={points} />
         )}
       </div>
 
